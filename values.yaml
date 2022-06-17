@@ -1,23 +1,47 @@
----
-loki:
-  enabled: true
-  persistence:
-    enabled: true
-    storageClass: managed-nfs-storage
-    size: 1Gi
-
 promtail:
   enabled: true
+  config:
+    lokiAddress: http://{{ .Release.Name }}:3100/loki/api/v1/push
+
+prometheus:
+  enabled: true
+  isDefault: true
+  alertmanager:
+    enabled: false
+  pushgateway:
+    enabled: true
+  persistence:
+    type: pvc
+    enabled: false
+    storageClassName: managed-nfs-storage
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+
+loki:
+  enabled: true
+  isDefault: false
+
+  persistence:
+    enabled: false
+    accessModes:
+    - ReadWriteOnce
+    size: 10Gi
+    annotations: {}
+    existingClaim:
+    storageClassName: managed-nfs-storage
 
 grafana:
   enabled: true
   sidecar:
     datasources:
       enabled: true
-
-prometheus:
-  enabled: true
-  persistence:
+      maxLines: 1000
+  image:
+    tag: 8.3.5
+  ingress:
     enabled: true
-    storageClass: managed-nfs-storage
-    size: 1Gi
+    path: /
+    pathType: Prefix
+    hosts:
+      - grafana.local
