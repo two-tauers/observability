@@ -12,7 +12,7 @@ prometheus:
     enabled: true
   persistence:
     type: pvc
-    enabled: false
+    enabled: true
     storageClassName: managed-nfs-storage
     accessModes:
       - ReadWriteOnce
@@ -23,7 +23,7 @@ loki:
   isDefault: false
 
   persistence:
-    enabled: false
+    enabled: true
     accessModes:
     - ReadWriteOnce
     size: 10Gi
