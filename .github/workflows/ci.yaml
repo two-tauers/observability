@@ -48,11 +48,11 @@ jobs:
           cat > opentelemetry/endpoints.yaml << EOL
           ---
           config:
-          exporters:
-            prometheusremotewrite:
-              endpoint: https://localhost/api/prom/push
-            loki:
-              endpoint: "https://localhost/loki/api/v1/push"
+            exporters:
+              prometheusremotewrite:
+                endpoint: https://localhost/api/prom/push
+              loki:
+                endpoint: "https://localhost/loki/api/v1/push"
           EOL
 
           helm repo add opentelemetry https://open-telemetry.github.io/opentelemetry-helm-charts
