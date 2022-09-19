@@ -45,7 +45,7 @@ jobs:
 
       - name: Test OTel helm install
         run: |-
-          cat > opentelemetry/endpoint.yaml << EOL
+          cat > opentelemetry/endpoints.yaml << EOL
           ---
           config:
           exporters:
