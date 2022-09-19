@@ -43,7 +43,7 @@ jobs:
           config: .github/kind.yaml
           node_image: "kindest/node:${{ matrix.k8s }}"
 
-      - name: Test OTel helm insdtall
+      - name: Test OTel helm install
         run: |-
           cat > opentelemetry/endpoint.yaml << EOL
           ---
@@ -55,6 +55,8 @@ jobs:
               endpoint: "https://localhost/loki/api/v1/push"
           EOL
 
+          helm repo add opentelemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm repo update opentelemetry
           helm upgrade --install \
             otel-agent opentelemetry/opentelemetry-collector \
             -n opentelemetry --create-namespace \
