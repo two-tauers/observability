@@ -1,36 +1,41 @@
-# observability
+# Observability setup for two-tauers
 
-Observability for the cluster
 
-## Grafana Loki
+## OpenTelemetry
 
-### Docs
-
-https://grafana.com/docs/loki/latest/
-
-https://github.com/grafana/helm-charts/tree/main/charts/loki-stack
+OpenTelemetry agents running as a daemonset to collect and forward metrics and logs to Grafana Cloud.
 
 ### Install
 
-```
-helm repo add grafana https://grafana.github.io/helm-charts
-helm install loki-stack grafana/loki-stack --values values.yaml --namespace o11y --create-namespace
-```
+1. Create `opentelemetry/endpoints.yaml` file with the Prometheus and Loki endpoints for your Grafana Cloud instance, e.g.:
 
-Retrieve Grafana password:
+    ```yaml
+    ---
+    config:
+    exporters:
+        prometheusremotewrite:
+        endpoint: https://<USER>:<TOKEN>@prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push
 
-```
-kubectl get secret --namespace o11y loki-stack-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
-```
+        loki:
+        endpoint: "https://<USER>:<TOKEN>@logs-prod3.grafana.net/loki/api/v1/push"
+    ```
 
-Port-forward to [localhost:3000](http://localhost:3000):
+2. Install the helm chart by running
 
-```
-kubectl port-forward -n monitoring svc/loki-stack-grafana 3000:80
-```
+    ```bash
+    helm upgrade --install otel-agent opentelemetry/opentelemetry-collector -n opentelemetry --create-namespace --values opentelemetry/agent.yaml --values opentelemetry/endpoints.yaml
+    ```
 
-### Uninstall
+### What is collected
 
-```
-helm delete loki-stack -n monitoring
-```
+#### Logs
+
+STDOUT and STDERR streams from pods running in the cluster.
+
+#### Metrics
+
+TBD (Currently only collects its own metrics)
+
+### Dashboard
+
+https://grafana.com/grafana/dashboards/15983-opentelemetry-collector/
