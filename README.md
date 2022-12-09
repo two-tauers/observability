@@ -5,6 +5,8 @@
 
 OpenTelemetry agents running as a daemonset to collect and forward metrics and logs to Grafana Cloud.
 
+>NOTE: There is a bug in loki exporter with a not yet released fix: https://stackoverflow.com/questions/73946449/unable-to-map-otlp-resource-attributes-into-loki-labels
+
 ### Install
 
 1. Create `opentelemetry/endpoints.yaml` file with the Prometheus and Loki endpoints for your Grafana Cloud instance, e.g.:
