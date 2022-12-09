@@ -1,68 +1,274 @@
----
 mode: daemonset
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: "otel-sa"
+
+clusterRole:
+  create: false
+  annotations: {}
+  name: "monitoring-read-only-cr"
+  rules: []
+
+  clusterRoleBinding:
+    annotations: {}
+    name: "monitoring-read-only-crb"
+
+extraEnvs:
+  - name: OTEL_AGENT_HOST_IP
+    valueFrom:
+      fieldRef:
+        apiVersion: v1
+        fieldPath: status.hostIP
+
+ports:
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+  statsd:
+    enabled: true
+    containerPort: 8125
+    servicePort: 8125
+    protocol: UDP
 
 presets:
   logsCollection:
     enabled: true
-    includeCollectorLogs: true
+    includeCollectorLogs: false
+  hostMetrics:
+    enabled: true
 
 config:
-  receivers:
+  exporters:
     otlp:
-      protocols:
-        grpc:
-          max_recv_msg_size_mib: 8
+      endpoint: otel-gateway-opentelemetry-collector:4317
+      tls:
+        insecure: true
+
+  receivers:
+    # NOTE: By Default, jaeger and zipkin receivers are enabled. disabling for now
+    jaeger: null
+    zipkin: null
+    # Enables scraping of pod logs
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/filelogreceiver
+    filelog:
+      include:
+      - /var/log/pods/*/*/*.log
+    # Only metrics specified in this section are collected as opposed to collecting ALL Kubernetes metrics which add no value
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/hostmetricsreceiver
+    hostmetrics:
+      collection_interval: 60s
+      scrapers:
+        cpu:
+          metrics:
+            system.cpu.time:
+              enabled: true
+            system.cpu.utilization:
+              enabled: true
+        disk:
+        load:
+          cpu_average: true
+        filesystem:
+        memory:
+          metrics:
+            system.memory.usage:
+              enabled: true
+            system.memory.utilization:
+              enabled: true
+        network:
+        paging:
+          metrics:
+            system.paging.utilization:
+              enabled: true
+        processes:
+
+    # https://prometheus.io/docs/prometheus/latest/configuration/configuration/#kubernetes_sd_config
     prometheus:
       config:
         scrape_configs:
-        - job_name: 'otel-collector'
-          scrape_interval: 10s
-          static_configs:
-          - targets: ['0.0.0.0:8888']
+          # You can create multiple jobs to scrape different resource types. https://github.com/prometheus/prometheus/blob/release-2.38/documentation/examples/prometheus-kubernetes.yml
+          # For the demo Java app, we have created a single job to scrape pods as these metrics are exposed at Pod level
+          - job_name: 'opentelemetry-collector'
+            tls_config:
+              insecure_skip_verify: true
+            scrape_interval: 5s
+            scrape_timeout: 2s
+            kubernetes_sd_configs:
+              # Role set to pod as we want to pull metrics based on configuration defined within pod annotation. Note relabel config is based on metadata set on pods.
+              - role: pod
+            relabel_configs:
+              # Only scrapes pods where annotation "prometheus.io/scrape: true" is set. Can dynamically disable scraping by changing the annotation to "false".
+              # Annotation MUST be set to enable scraping
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: "true"
+              # Only scrapes pods where label "monitoring.o11y.io/enabled: true" is set. Can dynamically disable scraping by changing the label to "false".
+              # Label MUST be set to enable scraping
+              # - source_labels: [__meta_kubernetes_pod_label_monitoring_o11y_io_enabled]
+              #   action: keep
+              #   regex: "true"
+              #  Enables support for both http and https protocol scheme used for requests.
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scheme]
+                action: replace
+                target_label: __scheme__
+                regex: (https?)
+              # Set metrics path to be the value specified in the pod annotation "prometheus.io/path".
+              # Annotation MUST be set else scrape will fail as the receiver will be expecting to collect metrics from the path defined on the annotation
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              # Sets the port from which the scrape will be executed on the pod. Therefore, scrape is only performed on this single port
+              # Annotation "prometheus.io/port" MUST be set else scrtape will fail.
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                target_label: __address__
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+              # This is the best explanation of labelmap I found,  https://groups.google.com/g/prometheus-users/c/GqP2eSBmHNE
+              # The labelmap below will attach all pod labels that start with "catalog.anaplan.io_" to reported metrics.
+              # In addition it will replace the pod label name to the resulting regex extraction of $1.
+              # Therefore, pod label, catalog.anaplan.io/owner=persicope, will be "owner=periscope" attached to the reported prometheus scraped metric metadata
+              # Note I am only adding labels as per ADR https://anaplansite.atlassian.net/wiki/spaces/PI/pages/2533523726/ADR-017+Resource+Labels
+              - action: labelmap
+                regex: __meta_kubernetes_pod_label_catalog_anaplan_io_(.+)
+            # metric_relabel_configs works in the same way as relabel_configs but at individual metric level as opposed to scrape target.
+            # This can be used to drop unwanted metrics as demonstrated below where all jvm_gc_pause_seconds_count and jvm_gc_pause_seconds_max metrics will be discarded.
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                regex: "jvm_gc_pause_seconds_(count|max)"
+                action: drop
+    statsd:
+      endpoint: "${MY_POD_IP}:8125"
+      aggregation_interval: 60s
+      enable_metric_type: false
+      is_monotonic_counter: false
+      timer_histogram_mapping:
+        - statsd_type: "histogram"
+          observer_type: "gauge"
+        - statsd_type: "timing"
+          observer_type: "gauge"
 
   processors:
-    attributes:
-      actions:
-      - action: insert
-        key: loki.attribute.labels
-        value: http.status_code
+    # Section to demo metric filtering using the filterprocessor https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/filterprocessor
+    # This will only get enabled once added to the service pipelines section
+    # All metrics that match the regex expression below will get dropped
+    filter/demo:
+      metrics:
+        # include:
+        #   match_type: regexp
+        #   metric_names:
+        #     - prefix/.*
+        #     - prefix_.*
+        #   resource_attributes:
+        #     - Key: container.name
+        #       Value: app_container_1
+        exclude:
+          match_type: regexp
+          metric_names:
+            - jvm_threads_.*
+    batch:
+      send_batch_size: 5000
+      send_batch_max_size: 10000
+      timeout: 10s
 
-    resource:
-      attributes:
-      - action: insert
-        key: loki.resource.labels
-        value: pod.name
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/2e6b6ffabdb81f335499d364f5a2fd33e38adac6/processor/resourcedetectionprocessor
+    resourcedetection/env:
+      detectors:
+        - env
+      timeout: 2s
+      override: false
+    resourcedetection/system:
+      detectors:
+        - system
+      system:
+        hostname_sources:
+          - os
 
-  exporters:
-    logging:
-      logLevel: debug
-
-    loki:
-      format: json
-      tls:
-        insecure: true
-      timeout: 20s
-      labels:
-        attributes:
-          log.iostream: "log_iostream"
-          log.file.path: "log_file_path"
-          k8s.namespace.name: "k8s_namespace_name"
-          k8s.pod.name: "k8s_pod_name"
-          k8s.pod.uid: "k8s_pod_uid"
-          k8s.container.name: "k8s_container_name"
-          k8s.container.restart_count: "k8s_container_restart_count"
-        resource:
-          host.name: "hostname"
-          os.type: "os_type"
-          k8s.object.name: "k8s_object_name"
+    # https://pkg.go.dev/github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor#hdr-As_an_agent
+    # Setting config to ensure that telemetry data is only collected from resources local to the node
+    k8sattributes:
+      filter:
+        node_from_env_var: OTEL_AGENT_HOST_IP
+      auth_type: "serviceAccount"
+      passthrough: true
+      extract:
+        metadata:
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.deployment.name
+          - k8s.node.name
+          - k8s.namespace.name
+          - k8s.pod.start_time
+          - k8s.replicaset.name
+          - k8s.replicaset.uid
+          - k8s.daemonset.name
+          - k8s.daemonset.uid
+        annotations:
+          - tag_name: $1
+            key_regex: prometheus.io/(.*)
+        labels:
+          - tag_name: $1
+            key_regex: app.kubernetes.io/(.*)
+          - tag_name: $1
+            key_regex: catalog.anaplan.io/(.*)
+          - tag_name: $1
+            key_regex: monitoring.o11y.io/(.*)
+      pod_association:
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+        - sources:
+          - from: connection
 
   service:
+    telemetry:
+      logs:
+        level: debug
+        development: true
     pipelines:
       metrics:
-        receivers: [prometheus]
-        processors: []
-        exporters: [prometheusremotewrite]
+        exporters:
+          - otlp
+        processors:
+          - batch
+          # enables the telemetry data filtering as configured under processors section above
+          - filter/demo
+          - resourcedetection/env
+          - resourcedetection/system
+          - k8sattributes
+        receivers:
+          # disabling otlp receiver as we are using prometheus receiver for metric collection
+          # - otlp
+          - statsd
+          - prometheus
+          - hostmetrics
+      traces:
+        exporters:
+          - otlp
+        processors:
+          - batch
+          - k8sattributes
+          - resourcedetection/env
+          - resourcedetection/system
+        receivers:
+          - otlp
       logs:
-        receivers: [otlp]
-        processors: []
-        exporters: [loki]
+        exporters:
+          - otlp
+        processors:
+          - batch
+          - resourcedetection/env
+          - resourcedetection/system
+          - k8sattributes
+        receivers:
+          - filelog

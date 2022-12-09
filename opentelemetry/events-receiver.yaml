@@ -1,0 +1,116 @@
+mode: deployment
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: "otel-sa"
+
+clusterRole:
+  create: false
+  annotations: {}
+  name: "monitoring-read-only-cr"
+  rules: []
+
+  clusterRoleBinding:
+    annotations: {}
+    name: "monitoring-read-only-crb"
+
+ports:
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+
+presets:
+  logsCollection:
+    enabled: false
+    includeCollectorLogs: false
+  hostMetrics:
+    enabled: false
+
+config:
+  exporters:
+    otlp:
+      endpoint: otel-gateway-opentelemetry-collector:4317
+      tls:
+        insecure: true
+
+  receivers:
+    jaeger: null
+    zipkin: null
+    k8s_events:
+      auth_type: serviceAccount
+
+  processors:
+    batch:
+      send_batch_size: 5000
+      send_batch_max_size: 10000
+      timeout: 10s
+    resourcedetection/env:
+      detectors:
+        - env
+      timeout: 2s
+      override: false
+    resourcedetection/system:
+      detectors:
+        - system
+      system:
+        hostname_sources:
+          - os
+    k8sattributes:
+      auth_type: "serviceAccount"
+      passthrough: true
+      extract:
+        metadata:
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.deployment.name
+          - k8s.node.name
+          - k8s.namespace.name
+          - k8s.pod.start_time
+          - k8s.replicaset.name
+          - k8s.replicaset.uid
+          - k8s.daemonset.name
+          - k8s.daemonset.uid
+        annotations:
+          - tag_name: $1
+            key_regex: prometheus.io/(.*)
+        labels:
+          - tag_name: $1
+            key_regex: app.kubernetes.io/(.*)
+          - tag_name: $1
+            key_regex: catalog.anaplan.io/(.*)
+          - tag_name: $1
+            key_regex: monitoring.o11y.io/(.*)
+      pod_association:
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+        - sources:
+          - from: connection
+
+  service:
+    telemetry:
+      logs:
+        level: warn
+        development: true
+    pipelines:
+      metrics: null
+      traces: null
+      logs:
+        exporters:
+          - otlp
+        processors:
+          - batch
+          - resourcedetection/env
+          - resourcedetection/system
+          - k8sattributes
+        receivers:
+          - k8s_events

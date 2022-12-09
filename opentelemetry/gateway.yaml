@@ -1,0 +1,127 @@
+mode: deployment
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: "otel-sa"
+
+clusterRole:
+  create: false
+  annotations: {}
+  name: "monitoring-read-only-cr"
+  rules: []
+
+  clusterRoleBinding:
+    annotations: {}
+    name: "monitoring-read-only-crb"
+
+ports:
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+
+presets:
+  logsCollection:
+    enabled: false
+    includeCollectorLogs: false
+  hostMetrics:
+    enabled: false
+
+config:
+  exporters:
+    #################################################################################
+    ### INFO: To use the prometheusremotewrite exporter, copy this file to a new  ###
+    ### file called gateway-with-grafana.yaml and uncomment these lines there     ###
+    #################################################################################
+    # prometheusremotewrite:
+    #   endpoint: "https://<GRAFANA_INSTANCE_ID>:<GRAFANA_API_KEY>@<GRAFANA_PROM_URL>"
+    #   resource_to_telemetry_conversion:
+    #     enabled: true
+    #   remote_write_queue:
+    #     enabled: true
+    #     queue_size: 10000
+
+    #################################################################################
+    ### INFO: To use the loki exporter, copy this file to a new                   ###
+    ### file called gateway-with-grafana.yaml and uncomment these lines there     ###
+    #################################################################################
+    loki:
+      endpoint: "https://261439:eyJrIjoiMjBjNGQyNWViMzcyYmU3ZmIwYTIyNGI4YzFhZTQyNmUzNDNkMGY2OSIsIm4iOiJwaWJveCIsImlkIjo2ODkyNTh9@logs-prod3.grafana.net/loki/api/v1/push"
+      format: json
+      tls:
+        insecure: true
+      timeout: 20s
+      labels:
+        attributes:
+          log.iostream: "log_iostream"
+          log.file.path: "log_file_path"
+          k8s.namespace.name: "k8s_namespace_name"
+          k8s.pod.name: "k8s_pod_name"
+          k8s.pod.uid: "k8s_pod_uid"
+          k8s.container.name: "k8s_container_name"
+          k8s.container.restart_count: "k8s_container_restart_count"
+        resource:
+          host.name: "hostname"
+          os.type: "os_type"
+          k8s.object.name: "k8s_object_name"
+
+    #################################################################################
+    ### INFO: To use the otlp/tempo exporter, copy this file to a new             ###
+    ### file called gateway-with-grafana.yaml and uncomment these lines there     ###
+    #################################################################################
+    # otlp/tempo:
+    #   endpoint: tempo-us-central1.grafana.net:443
+    #   headers:
+    #     authorization: "Basic <BASE64_ENCODED_STRING>"
+
+    logging: {}
+
+  receivers:
+    jaeger: null
+    zipkin: null
+    otlp:
+      protocols:
+        grpc:
+          max_recv_msg_size_mib: 8
+
+  processors:
+    batch:
+      send_batch_size: 5000
+      send_batch_max_size: 10000
+      timeout: 10s
+
+  service:
+    telemetry:
+      logs:
+        level: debug
+        development: true
+    pipelines:
+      metrics:
+        exporters:
+          - logging
+          # - prometheusremotewrite # Uncomment to send metrics to the endpoint specified above at config.exporters.prometheusremotewrite
+        processors:
+          - batch
+        receivers:
+          - otlp
+      traces:
+        exporters:
+          - logging
+          # - otlp/tempo # Uncomment to send traces to the grafana tempo endpoint specified above at config.exporters.otlp/tempo
+        processors:
+          - batch
+        receivers:
+          - otlp
+      logs:
+        exporters:
+          - logging
+          - loki # Uncomment to send logs to the grafana loki endpoint specified above at config.exporters.loki
+        processors:
+          - batch
+        receivers:
+          - otlp
