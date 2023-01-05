@@ -51,7 +51,6 @@ config:
     ### file called gateway-with-grafana.yaml and uncomment these lines there     ###
     #################################################################################
     loki:
-      endpoint: "https://261439:eyJrIjoiMjBjNGQyNWViMzcyYmU3ZmIwYTIyNGI4YzFhZTQyNmUzNDNkMGY2OSIsIm4iOiJwaWJveCIsImlkIjo2ODkyNTh9@logs-prod3.grafana.net/loki/api/v1/push"
       format: json
       tls:
         insecure: true
